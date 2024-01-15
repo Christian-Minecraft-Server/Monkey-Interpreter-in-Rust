@@ -1,5 +1,8 @@
 use core::fmt;
 use std::collections::HashMap;
+use std::io::stdin;
+use std::io::stdout;
+use std::io::Write;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum TokenType {
@@ -9,6 +12,13 @@ enum TokenType {
     /* identifiers + literals */
     ASSIGN,
     PLUS,
+    MINUS,
+    BANG,
+    ASTERISK,
+    SLASH,
+
+    LT,
+    GT,
 
     /* delimiters */
     COMMA,
@@ -22,12 +32,21 @@ enum TokenType {
     /* keyword */
     FUNCTION,
     LET,
+    TRUE,
+    FALSE,
+    IF,
+    ELSE,
+    RETURN,
 
     /* identifer */
     IDENTIFIER,
 
     /* numbers */
     INT,
+
+    /* two character tokens*/
+    EQ,
+    NOT_EQ,
 }
 
 #[derive(Debug)]
@@ -60,7 +79,18 @@ impl Lexer {
         }
     }
 
-    // returns the
+    // creates a two character token, and advances to the character after it ends
+    fn make_two_character_token(&mut self, token_type: TokenType) -> Token {
+        let first_char = self.current_char;
+        self.read_char();
+        self.read_char();
+        return Token {
+            token_type,
+            literal: String::from(first_char) + &String::from(self.current_char.clone()),
+        };
+    }
+
+    // returns the next token, and advances the read position to the character after it ends
     fn next_token(&mut self) -> Token {
         self.eat_whitespace();
 
@@ -74,18 +104,37 @@ impl Lexer {
 
         let single_char_token_map = HashMap::from([
             ('=', TokenType::ASSIGN),
-            ('+', TokenType::PLUS),
             ('(', TokenType::LPARAN),
             (')', TokenType::RPARAN),
             ('{', TokenType::LBRACE),
             ('}', TokenType::RBRACE),
             (',', TokenType::COMMA),
             (';', TokenType::SEMICOLON),
-            (0 as char, TokenType::EOF),
+            ('+', TokenType::PLUS),
+            ('-', TokenType::MINUS),
+            ('!', TokenType::BANG),
+            ('*', TokenType::ASTERISK),
+            ('/', TokenType::SLASH),
+            ('>', TokenType::GT),
+            ('<', TokenType::LT),
+            ('\0', TokenType::EOF),
         ]);
 
         let token_type = match single_char_token_map.get(&self.current_char) {
-            Some(t) => t.clone(), // Clones whatever is pulled from the hashmap, this seems fine
+            Some(t) => {
+                // I don't like this, I should compare one character than another, the shortcutting
+                // on the && so I don't unnecessarily peek characters is nice though. PROBLEM: I should only
+                // be checking for a 2nd equal on the case where I already know the current
+                // character is an equal. Here, I'm checking if the 1st character matches any of
+                // the list, then checking if the character is a equal again, then if so checking
+                // if the next character is an equal.
+                if t == &TokenType::BANG && self.peek_char() == '=' {
+                    return self.make_two_character_token(TokenType::NOT_EQ);
+                } else if t == &TokenType::ASSIGN && self.peek_char() == '=' {
+                    return self.make_two_character_token(TokenType::EQ);
+                }
+                t.clone()
+            } // Clones whatever is pulled from the hashmap, this seems fine
             None => {
                 // return early to avoid advancing an additional character
                 if self.is_identifier_char() {
@@ -97,12 +146,13 @@ impl Lexer {
             }
         };
 
-        // advance to the next character
+        // store the current character I'm processing, then advance to the next character
+        let current_char = self.current_char;
         self.read_char();
 
         return Token {
             token_type,
-            literal: String::from(self.current_char),
+            literal: String::from(current_char),
         };
     }
 
@@ -110,6 +160,11 @@ impl Lexer {
     fn read_char(&mut self) {
         self.current_char = self.input.chars().nth(self.read_position).unwrap_or('\0'); // '\0' represents all of input has been read
         self.read_position += 1;
+    }
+
+    /* return the next the next character without advancing */
+    fn peek_char(&self) -> char {
+        self.input.chars().nth(self.read_position).unwrap_or('\0') // '\0' represents all of input has been read
     }
 
     // side effect: advances the current_char and read_position to the end of the next identifier token
@@ -168,7 +223,15 @@ impl Lexer {
     // return keyword TokenType, if the keyword exists otherwise returns IDENTIFIER TokenType
     // checks keyword "table" to determine if identifier is a keyword?
     fn lookup_identifier(identifier: &String) -> TokenType {
-        let token_type_words = [("fn", TokenType::FUNCTION), ("let", TokenType::LET)];
+        let token_type_words = [
+            ("fn", TokenType::FUNCTION),
+            ("let", TokenType::LET),
+            ("if", TokenType::IF),
+            ("else", TokenType::ELSE),
+            ("true", TokenType::TRUE),
+            ("false", TokenType::FALSE),
+            ("return", TokenType::RETURN),
+        ];
         for (token_word, token_type) in token_type_words.into_iter() {
             if identifier == token_word {
                 return token_type;
@@ -179,20 +242,44 @@ impl Lexer {
 }
 
 fn main() {
-    /* an instance and method calls so Rust stop giving warnings for unused functions and structs */
-    let mut l = Lexer::new(String::from("wow = 1 + 1;"));
+    /* a simple REPL, outputs the tokens created by a line */
     loop {
-        let token = l.next_token();
-        if token.token_type != TokenType::EOF {
-            println!("{}", token)
-        } else {
-            break;
+        print!(">>");
+        stdout().flush().unwrap();
+        let mut s = String::new();
+        stdin().read_line(&mut s).unwrap();
+        let mut l = Lexer::new(s);
+
+        let mut t = l.next_token();
+        while t.token_type != TokenType::EOF {
+            println!("{}", t);
+            t = l.next_token();
         }
     }
 }
 
+/* A helper function for test, exports all tokens from a string as a vector */
+fn all_tokens_types_from_string(input: String) -> Vec<TokenType> {
+    let mut l = Lexer::new(input);
+    let mut tokens = vec![];
+    loop {
+        tokens.push(l.next_token());
+        if tokens.iter().last().unwrap().token_type == TokenType::EOF {
+            // I put something in so I know I have atleast 1 thing to unwrap
+            break;
+        }
+    }
+
+    // TODO: Figure out how to use a map to seperate out of the token types
+    let mut token_types = vec![];
+    for token in tokens.iter() {
+        token_types.push(token.token_type.clone());
+    }
+
+    return token_types;
+}
+
 #[test]
-//
 fn lex_compound() {
     let correct_token_types = [
         TokenType::FUNCTION,
@@ -219,3 +306,22 @@ fn lex_compound() {
         assert_eq!(l.next_token().token_type, correct_token);
     }
 }
+
+#[test]
+fn two_char_tokens() {
+    let token_types = all_tokens_types_from_string(String::from("!====!"));
+    let token_types = dbg!(token_types);
+    assert_eq!(
+        token_types,
+        vec![
+            TokenType::NOT_EQ,
+            TokenType::EQ,
+            TokenType::ASSIGN,
+            TokenType::BANG,
+            TokenType::EOF
+        ]
+    );
+}
+
+/* TODO: Test case for whitespace between characters on two character tokens */
+/* TODO: Test for illegal characters */
