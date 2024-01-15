@@ -210,6 +210,7 @@ fn lex_compound() {
         TokenType::RPARAN,
         TokenType::SEMICOLON,
         TokenType::RBRACE,
+        TokenType::EOF,
     ];
 
     let mut l = Lexer::new(String::from("fn main() { let i = (\n2 +  2    ); }"));
